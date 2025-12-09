@@ -1,0 +1,405 @@
+#region VEXcode Generated Robot Configuration
+from vex import *
+import urandom
+import math
+
+# Brain should be defined by default
+brain=Brain()
+
+# Robot configuration code
+
+
+# wait for rotation sensor to fully initialize
+wait(30, MSEC)
+
+
+# Make random actually random
+def initializeRandomSeed():
+    wait(100, MSEC)
+    random = brain.battery.voltage(MV) + brain.battery.current(CurrentUnits.AMP) * 100 + brain.timer.system_high_res()
+    urandom.seed(int(random))
+      
+# Set random seed 
+initializeRandomSeed()
+
+
+def play_vexcode_sound(sound_name):
+    # Helper to make playing sounds from the V5 in VEXcode easier and
+    # keeps the code cleaner by making it clear what is happening.
+    print("VEXPlaySound:" + sound_name)
+    wait(5, MSEC)
+
+# add a small delay to make sure we don't print in the middle of the REPL header
+wait(200, MSEC)
+# clear the console to make sure we don't have the REPL in the console
+print("\033[2J")
+
+#endregion VEXcode Generated Robot Configuration
+
+
+# ------------------------------------------
+# 
+# 	Project:      VEXcode Project
+#	Author:       VEX
+#	Created:
+#	Description:  VEXcode V5 Python Project
+# 
+# ------------------------------------------
+
+# Library imports
+from vex import *
+from enum import Enum
+import math
+
+brain = Brain()
+
+#CONSTANTS
+class PORTS(Enum):
+    #MOTORS
+    FRONT_LEFT = Ports.PORT1
+    FRONT_RIGHT = Ports.PORT2
+    BACK_LEFT = Ports.PORT3
+    BACK_RIGHT = Ports.PORT4
+
+
+
+class ROBOT():
+    PI = math.pi
+    TRACK_WIDTH = 12.0
+    WHEEL_DIAMETER = 4.0
+    WHEEL_CIRCUMFERENCE = PI * WHEEL_DIAMETER
+
+    
+
+
+#Equations
+class drivetrain_equations:
+
+    def distance_to_revolutions(self, dist):
+        return dist / ROBOT.WHEEL_CIRCUMFERENCE
+    
+    def robotTurn_to_revolutions(self, x):
+        """
+        x = 1 -> 360° turn
+
+        x = 2 → 180°
+
+        x = 4 → 90°
+
+        x = 8 → 45°, and so on
+
+        """
+
+
+        turning_circumference = ROBOT.PI * ROBOT.TRACK_WIDTH
+        turn_dist = turning_circumference / x
+        return turn_dist / ROBOT.WHEEL_CIRCUMFERENCE
+    
+    def tiles_to_inches(self, x):
+        return (2*x) / 12 
+    
+class PID_equations:
+    
+    def proportional(self, kp, error):
+        return kp * error
+    
+    def derivative(self, kd, curr_error, prev_error, curr_time, prev_time):
+        return kd * ((curr_error - prev_error) / (curr_time - prev_time))
+    
+
+
+#Class for drivetrain
+class Drivetrain():
+
+    def __init__(selft, fr, fl, br, bl, Kp = 0.00, Ki = 0.00, Kd = 0.00):
+        self.front_r = Motor(fr)
+        self.front_l = Motor(fl);
+        self.back_r = Motor(br);
+        self.back_l = Motor(bl);
+        self.motorDict = {"front-right" : self.front_r, "front-left" : self.front_l, "back-right" : self.back_r, "back-left" : self.back_l}
+
+        #PID Variables
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+
+    
+    def power_motor(self, name, percent, direction):
+        motor = self.motorDict[name]
+        motor.set_velocity(percent, PERCENT)
+        motor.spin(direction)
+    
+    
+    def power_right_motors(self, percent, direction):
+        right_motors = MotorGroup(self.motorDict["front-right"], self.motorDict["back-right"])
+        right_motors.set_velocity(percent, PERCENT)
+        right_motors.spin(direction)
+
+
+    def power_left_motors(self, percent, direction):
+        left_motors = MotorGroup(self.motorDict["front-left"], self.motorDict["back-left"])
+        left_motors.set_velocity(percent, PERCENT)
+        left_motors.spin(direction)
+    
+    def travelTo(self, revolutions, percent):
+        right_motors = MotorGroup(self.motorDict["front-right"], self.motorDict["back-right"])
+        left_motors = MotorGroup(self.motorDict["front-left"], self.motorDict["back-left"])
+
+        left_motors.set_velocity(percent, PERCENT)
+        right_motors.set_velocity(percent, PERCENT)
+
+        left_motors.spin_for(FORWARD, revolutions, TURNS)
+        right_motors.spin_for(FORWARD, revolutions, TURNS)
+    
+    def turnTo(self, revolutions, percent):
+        right_motors = MotorGroup(self.motorDict["front-right"], self.motorDict["back-right"])
+        left_motors = MotorGroup(self.motorDict["front-left"], self.motorDict["back-left"])
+
+        left_motors.set_velocity(percent, PERCENT)
+        right_motors.set_velocity(percent, PERCENT)
+
+        right_motors.spin_for(FORWARD, -1 * revolutions, TURNS)
+        left_motors.spin_for(FORWARD, revolutions, TURNS)
+    
+    def pd_controller(self, target, is_turning = False, turning_direct = 1): 
+        pid = PID_equations()
+        Kp = self.Kp
+        Kd = self.Kd
+
+        prev_error = target
+        prev_time = brain.timer.time(SECONDS)
+
+        for motor in self.motorDict.values():
+            motor.reset_position()
+
+
+        while True:
+            curr_time = brain.timer.time(SECONDS)
+            curr_pos = 0
+
+            if not is_turning:
+                curr_pos = (self.motorDict["front-left"].position(TURNS) + self.motorDict["front-right"].position(TURNS)) / 2
+            else:
+                curr_pos = (self.motorDict["front-left"].position(TURNS) - self.motorDict["front-right"].position(TURNS)) / 2
+
+            error = target - curr_pos
+
+            if abs(error) < 0.01:
+                for motor in self.motorDict.values():
+                    motor.reset_position()
+                break
+            
+            proportional = pid.proportional(Kp, error)
+            derivative = pid.derivative(Kd, error, prev_error, curr_time, prev_time)
+
+            motor_power = proportional + derivative
+            motor_power = max(min(motor_power, 100), -100)
+
+            if not is_turning:
+                self.power_left_motors(motor_power, FORWARD)
+                self.power_right_motors(motor_power, FORWARD)
+            else:
+                self.power_left_motors(turning_direct * motor_power, FORWARD)
+                self.power_right_motors((-1 * motor_power) * turning_direct, FORWARD)
+
+            prev_error = error
+            prev_time = curr_time
+
+            wait(20, MSEC) #0.02 seconds
+
+    
+
+#Autonomous features
+class ActionNode:
+    def __init__(self, actionName, actionValue):
+        self.name = actionName
+        self.val = actionValue
+        self.Next = None
+        self.Prev = None
+        
+    
+class ActionList:
+    def __init__(self):
+        self.head = None
+        self.tail = None
+    
+    def append(self, actionName, actionValue):
+        new_node = ActionNode(actionName, actionValue)
+
+        if self.head is None:
+            self.head = new_node
+            self.tail = new_node
+        else:
+            self.tail.Next = new_node
+            new_node.Prev = self.tail
+            self.tail = new_node
+
+
+
+def teleOp():
+    """
+    axis1 - Left and right of the right joystick.
+    axis2 - Up and down of the right joystick.
+    axis3 - Up and down of the left joystick.
+    axis4 - Left and right of the left joystick.
+    """
+
+    controller = Controller();
+    fr = PORTS.FRONT_RIGHT.value
+    fl = PORTS.FRONT_LEFT.value
+    br = PORTS.BACK_RIGHT.value
+    bl = PORTS.BACK_LEFT.value
+
+
+    robot = Drivetrain(fr, fl, br, bl)
+
+    while True:
+        right_joy_stick = controller.axis2.position()
+        left_joy_stick = controller.axis4.position()
+
+        robot.power_right_motors(right_joy_stick - left_joy_stick, PERCENT)
+        robot.power_left_motors(right_joy_stick + left_joy_stick, PERCENT)
+
+        wait(5, MSEC)
+
+def auto_standard():
+    """
+    1 Tile = 2ft
+
+    2ft = 24 in b/c 1ft = 12in
+
+    EX: 5 tiles = 10ft = 120in 
+
+    f(x) = 2x * 12
+    """
+
+    fr = PORTS.FRONT_RIGHT.value
+    fl = PORTS.FRONT_LEFT.value
+    br = PORTS.BACK_RIGHT.value
+    bl = PORTS.BACK_LEFT.value
+
+
+    robot = Drivetrain(fr, fl, br, bl)
+    robot_equations = drivetrain_equations()
+
+    act1_name, act1_val = ["travel", 5] 
+    act2_name, act2_val = ["turn", 4] 
+    act3_name, act3_val = ["travel", 6] 
+
+
+    schedule = ActionList()
+    schedule.append(act1_name, act1_val)
+    schedule.append(act2_name, act2_val)
+    schedule.append(act3_name, act3_val)
+
+    current_node = schedule.head
+    while current_node:
+        revolutions = 0
+
+        if current_node.name == "travel":
+            distant = robot_equations.tiles_to_inches(current_node.val)
+            revolutions = robot_equations.distance_to_revolutions(distant)
+            robot.travelTo(revolutions, 100)
+
+        
+        if current_node.name == "turn":
+            distant = robot_equations.tiles_to_inches(current_node.val)
+            revolutions = robot_equations.robotTurn_to_revolutions(distant)
+            robot.turnTo(revolutions, 90)
+        
+
+        current_node = current_node.Next
+
+def auto_with_PID():
+    fr = PORTS.FRONT_RIGHT.value
+    fl = PORTS.FRONT_LEFT.value
+    br = PORTS.BACK_RIGHT.value
+    bl = PORTS.BACK_LEFT.value
+    KP = 0.001
+    KD = 0.005
+
+    robot = Drivetrain(fr, fl, br, bl, Kp = KP, Kd = KD)
+    robot_equations = drivetrain_equations()
+
+    act1_name, act1_val = ["travel", 5] 
+    act2_name, act2_val = ["turn", 4] 
+    act3_name, act3_val = ["travel", 6] 
+
+
+    schedule = ActionList()
+    schedule.append(act1_name, act1_val)
+    schedule.append(act2_name, act2_val)
+    schedule.append(act3_name, act3_val)
+
+    pid = PID_equations()
+
+
+    current_node = schedule.head
+    while current_node:
+        revolutions = 0
+
+        if current_node.name == "travel":
+            distant = robot_equations.tiles_to_inches(current_node.val)
+            revolutions = robot_equations.distance_to_revolutions(distant)
+            robot.pd_controller(revolutions)
+            
+
+
+        if current_node.name == "turn":
+            distant = robot_equations.tiles_to_inches(current_node.val)
+            revolutions = robot_equations.robotTurn_to_revolutions(distant)
+            robot.pd_controller(revolutions, True, 1)  
+
+
+        current_node = current_node.Next
+
+    
+
+
+
+#-----------------------------TESTING ------------------------------ #
+START_TESTING = False
+
+#Teleop Testing
+controller = Controller();
+fr = PORTS.FRONT_RIGHT.value
+fl = PORTS.FRONT_LEFT.value
+br = PORTS.BACK_RIGHT.value
+bl = PORTS.BACK_LEFT.value
+
+
+robot = Drivetrain(fr, fl, br, bl)
+
+
+while START_TESTING:
+    right_joy_stick = controller.axis2.position()
+    left_joy_stick = controller.axis4.position()
+
+    robot.power_right_motors(right_joy_stick - left_joy_stick, PERCENT)
+    robot.power_left_motors(right_joy_stick + left_joy_stick, PERCENT)
+
+    wait(5, MSEC) #0.005 Seconds
+
+
+
+#-------------------------------------------------------------------- #
+
+
+#GAME SETTINGS
+RUN = False
+auto_runTime = 15 #SECS
+teleOp_runTime = 150 #SECS --> 2:30
+
+
+
+
+#GAME RUNTIME
+while RUN:
+    time = brain.timer.time(SECONDS)
+
+    if time < auto_runTime:
+            auto_standard()
+    elif auto_runTime <= time < teleOp_runTime:
+            teleOp()
+    else:
+        break  
