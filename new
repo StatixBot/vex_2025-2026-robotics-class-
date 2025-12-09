@@ -1,0 +1,158 @@
+#region VEXcode Generated Robot Configuration
+from vex import *
+import urandom
+import math
+
+# Brain should be defined by default
+brain=Brain()
+
+# Robot configuration code
+
+
+# wait for rotation sensor to fully initialize
+wait(30, MSEC)
+
+
+# Make random actually random
+def initializeRandomSeed():
+    wait(100, MSEC)
+    random = brain.battery.voltage(MV) + brain.battery.current(CurrentUnits.AMP) * 100 + brain.timer.system_high_res()
+    urandom.seed(int(random))
+      
+# Set random seed 
+initializeRandomSeed()
+
+
+def play_vexcode_sound(sound_name):
+    # Helper to make playing sounds from the V5 in VEXcode easier and
+    # keeps the code cleaner by making it clear what is happening.
+    print("VEXPlaySound:" + sound_name)
+    wait(5, MSEC)
+
+# add a small delay to make sure we don't print in the middle of the REPL header
+wait(200, MSEC)
+# clear the console to make sure we don't have the REPL in the console
+print("\033[2J")
+
+#endregion VEXcode Generated Robot Configuration
+
+# ------------------------------------------
+# 
+# 	Project:      VEXcode Project
+#	Author:       VEX
+#	Created:
+#	Description:  VEXcode V5 Python Project
+# 
+# ------------------------------------------
+
+# Library imports
+from vex import *
+from enum import Enum
+import math
+
+class PORTS(Enum):
+    #MOTORS
+    FRONT_LEFT = Ports.PORT1
+    FRONT_RIGHT = Ports.PORT2
+    BACK_LEFT = Ports.PORT3
+    BACK_RIGHT = Ports.PORT4
+
+    #nav
+    INERTIAL = Ports.PORT5
+
+
+
+
+
+class Mecanum_drivetrain:
+
+    def __init__(self, fr, fl, br, bl, Kp = 0.00, Ki = 0.00, Kd = 0.00):
+        self.front_r = Motor(fr)
+        self.front_l = Motor(fl);
+        self.back_r = Motor(br);
+        self.back_l = Motor(bl);
+        self.motorDict = {"front-right" : self.front_r, "front-left" : self.front_l, "back-right" : self.back_r, "back-left" : self.back_l}
+
+        #PID Variables
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+    
+
+    def error(self, target, current_position):
+        return target - current_position
+    
+    def dX(self, joystick_x, joystick_y, theta):
+        return (joystick_x * math.cos(theta)) - (joystick_y * math.sin(theta))
+    
+    def dY(self, joystick_x, joystick_y, theta):
+        return (joystick_x * math.sin(theta)) + (joystick_y * math.cos(theta))
+
+class PID_equations:
+    
+    def proportional(self, kp, error):
+        return kp * error
+    
+    def derivative(self, kd, curr_error, prev_error, curr_time, prev_time):
+        return kd * ((curr_error - prev_error) / (curr_time - prev_time))
+
+
+controller = Controller()
+inertial_sensor = Inertial(PORTS.INERTIAL)
+robot_base = Mecanum_drivetrain(PORTS.FRONT_RIGHT.value, PORTS.FRONT_LEFT.value, PORTS.BACK_RIGHT.value, PORTS.BACK_LEFT.value)
+
+#Autonomous features
+class ActionNode:
+    def __init__(self, actionName, actionValue):
+        self.name = actionName
+        self.val = actionValue
+        self.Next = None
+        self.Prev = None
+        
+    
+class ActionList:
+    def __init__(self):
+        self.head = None
+        self.tail = None
+    
+    def append(self, actionName, actionValue):
+        new_node = ActionNode(actionName, actionValue)
+
+        if self.head is None:
+            self.head = new_node
+            self.tail = new_node
+        else:
+            self.tail.Next = new_node
+            new_node.Prev = self.tail
+            self.tail = new_node
+
+
+
+def teleOp():
+    while True:
+        robot_heading = inertial_sensor.heading(DEGREES)
+        theta = math.radians(robot_heading)
+
+        joystick_x = controller.axis1.position()
+        joystick_y = controller.axis2.position()
+        joystick_turn = -controller.axis4.position()
+
+        fwd = robot_base.dY(joystick_x, joystick_y, theta)
+        strafe = robot_base.dX(joystick_x, joystick_y, theta)
+        
+
+        FR = max(-100, min(fwd - strafe + joystick_turn, 100))
+        FL = max(-100, min(fwd + strafe - joystick_turn, 100))
+        BR = max(-100, min(fwd + strafe + joystick_turn, 100))
+        BL = max(-100, min(fwd - strafe - joystick_turn, 100))
+
+        robot_base.front_r.spin(FORWARD, FR)
+        robot_base.front_l.spin(FORWARD, FL)
+        robot_base.back_r.spin(FORWARD, BR)
+        robot_base.back_l.spin(FORWARD, BL)
+
+
+        
+
+def auto():
+    
